@@ -1,0 +1,1 @@
+gcc -Wall -g0 -O1 -Iuld-driver/inc -Iplatform ranging_basic.c -o my_ranging uld-driver/src/vl53l5cx_api.c uld-driver/src/vl53l5cx_plugin_detection_thresholds.c uld-driver/src/vl53l5cx_plugin_motion_indicator.c uld-driver/src/vl53l5cx_plugin_xtalk.c platform/platform.c
