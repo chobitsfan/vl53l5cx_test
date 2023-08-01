@@ -79,19 +79,42 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <signal.h>
 #include "vl53l5cx_api.h"
+
+int gogogo = 1;
+
+void abort_handler(int signum) {
+    gogogo = 0;
+}
 
 int main(int argc, char** argv)
 {
+    int sock_fd, prx_msg = 1;
+    struct sockaddr_in ipc_addr;
+    struct sigaction abort_act;
 
 	/*********************************/
 	/*   VL53L5CX ranging variables  */
 	/*********************************/
 
-	uint8_t 				status, loop, isAlive, isReady, i;
+	uint8_t 				status, isAlive, isReady;
 	VL53L5CX_ResultsData 	Results;		/* Results data from VL53L5CX */
 	VL53L5CX_Configuration 	Dev;
 
+    sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    memset(&ipc_addr, 0, sizeof(ipc_addr));
+    ipc_addr.sin_family      = AF_INET;            /* Internet Domain    */
+    ipc_addr.sin_port        = htons(17501);  //Server Port
+    ipc_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    abort_act.sa_handler = abort_handler;
+    sigemptyset(&abort_act.sa_mask);
+    abort_act.sa_flags = 0;
+    sigaction(SIGINT, &abort_act, NULL);
 
 	/*********************************/
 	/*   Power on sensor and init    */
@@ -138,7 +161,7 @@ int main(int argc, char** argv)
 	 * Using 4x4, min frequency is 1Hz and max is 60Hz
 	 * Using 8x8, min frequency is 1Hz and max is 15Hz
 	 */
-	status = vl53l5cx_set_ranging_frequency_hz(&Dev, 10);
+	status = vl53l5cx_set_ranging_frequency_hz(&Dev, 20);
 	if(status)
 	{
 		printf("vl53l5cx_set_ranging_frequency_hz failed, status %u\n", status);
@@ -158,8 +181,7 @@ int main(int argc, char** argv)
 
 	status = vl53l5cx_start_ranging(&Dev);
 
-	loop = 0;
-	while(loop < 10)
+	while(gogogo)
 	{
 		/* Use polling function to know when a new measurement is ready.
 		 * Another way can be to wait for HW interrupt raised on PIN A3
@@ -174,21 +196,26 @@ int main(int argc, char** argv)
 			/* As the sensor is set in 4x4 mode by default, we have a total 
 			 * of 16 zones to print. For this example, only the data of first zone are 
 			 * print */
-			printf("Print data no : %3u\n", Dev.streamcount);
-			for(i = 0; i < 16; i++)
+			/*printf("Print data no : %3u\n", Dev.streamcount);
+			for(int i = 0; i < 16; i++)
 			{
 				printf("Zone : %3d, Status : %3u, Distance : %4d mm\n",
 					i,
 					Results.target_status[VL53L5CX_NB_TARGET_PER_ZONE*i],
 					Results.distance_mm[VL53L5CX_NB_TARGET_PER_ZONE*i]);
 			}
-			printf("\n");
-			loop++;
+			printf("\n");*/
+            if ((Results.target_status[5] == 5 && Results.distance_mm[5] < 1500) ||
+                (Results.target_status[6] == 5 && Results.distance_mm[6] < 1500) ||
+                (Results.target_status[9] == 5 && Results.distance_mm[9] < 1500) ||
+                (Results.target_status[10] == 5 && Results.distance_mm[10] < 1500)) {
+                    sendto(sock_fd, &prx_msg, sizeof(prx_msg), 0, (struct sockaddr*)&ipc_addr, sizeof(ipc_addr));
+            }
 		}
 
 		/* Wait a few ms to avoid too high polling (function in platform
 		 * file, not in API) */
-		usleep(50*1000);
+		usleep(20*1000);
 	}
 
 	status = vl53l5cx_stop_ranging(&Dev);
