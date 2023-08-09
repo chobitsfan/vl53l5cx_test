@@ -80,10 +80,13 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/socket.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/un.h>
 #include <signal.h>
 #include "vl53l5cx_api.h"
+
+#define SERVER_PATH "/tmp/chobits_server2"
+#define SOCK_PATH "/tmp/chobits_2345"
 
 int gogogo = 1;
 
@@ -94,7 +97,7 @@ void abort_handler(int signum) {
 int main(int argc, char** argv)
 {
     int sock_fd, prx_msg = 1;
-    struct sockaddr_in ipc_addr;
+    struct sockaddr_un ipc_addr, local_addr;
     struct sigaction abort_act;
 
 	/*********************************/
@@ -105,11 +108,16 @@ int main(int argc, char** argv)
 	VL53L5CX_ResultsData 	Results;		/* Results data from VL53L5CX */
 	VL53L5CX_Configuration 	Dev;
 
-    sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    sock_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    memset(&local_addr, 0, sizeof(local_addr));
+    local_addr.sun_family = AF_UNIX;
+    strcpy(local_addr.sun_path, SOCK_PATH);
+    unlink(SOCK_PATH);
+    bind(sock_fd, (struct sockaddr*)&local_addr, sizeof(local_addr));
+
     memset(&ipc_addr, 0, sizeof(ipc_addr));
-    ipc_addr.sin_family      = AF_INET;            /* Internet Domain    */
-    ipc_addr.sin_port        = htons(17501);  //Server Port
-    ipc_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    ipc_addr.sun_family = AF_UNIX;
+    strcpy(ipc_addr.sun_path, SERVER_PATH);
 
     abort_act.sa_handler = abort_handler;
     sigemptyset(&abort_act.sa_mask);
