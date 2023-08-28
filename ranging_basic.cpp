@@ -78,17 +78,68 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
-#include <unistd.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/un.h>
 #include <signal.h>
+#include <math.h>
+#include <ros/ros.h>
+#include <sensor_msgs/PointCloud.h>
+#include <geometry_msgs/PointStamped.h>
 #include "vl53l5cx_api.h"
 
-#define SERVER_PATH "/tmp/chobits_server2"
-#define SOCK_PATH "/tmp/chobits_2345"
+const double VL53L5_Zone_Pitch8x8[64] = {
+	59.00,64.00,67.50,70.00,70.00,67.50,64.00,59.00,
+	64.00,70.00,72.90,74.90,74.90,72.90,70.00,64.00,
+	67.50,72.90,77.40,80.50,80.50,77.40,72.90,67.50,
+	70.00,74.90,80.50,85.75,85.75,80.50,74.90,70.00,
+	70.00,74.90,80.50,85.75,85.75,80.50,74.90,70.00,
+	67.50,72.90,77.40,80.50,80.50,77.40,72.90,67.50,
+	64.00,70.00,72.90,74.90,74.90,72.90,70.00,64.00,
+	59.00,64.00,67.50,70.00,70.00,67.50,64.00,59.00
+};
+const double VL53L5_Zone_Yaw8x8[64] = {
+	135.00,125.40,113.20, 98.13, 81.87, 66.80, 54.60, 45.00,
+	144.60,135.00,120.96,101.31, 78.69, 59.04, 45.00, 35.40,
+	156.80,149.04,135.00,108.45, 71.55, 45.00, 30.96, 23.20,
+	171.87,168.69,161.55,135.00, 45.00, 18.45, 11.31,  8.13,
+	188.13,191.31,198.45,225.00,315.00,341.55,348.69,351.87,
+	203.20,210.96,225.00,251.55,288.45,315.00,329.04,336.80,
+	203.20,225.00,239.04,258.69,281.31,300.96,315.00,324.60,
+    225.00,234.60,246.80,261.87,278.13,293.20,305.40,315.00
+};
+double SinOfPitch[64], CosOfPitch[64], SinOfYaw[64], CosOfYaw[64];
 
 int gogogo = 1;
+
+void ComputeSinCosTables(void)
+{
+	//This function will save the math processing time of the code.  If the user wishes to not
+	//perform this function, these tables can be generated and saved as a constant.
+	uint8_t ZoneNum;
+	for (ZoneNum = 0; ZoneNum < 64; ZoneNum++)
+	{
+		SinOfPitch[ZoneNum] = sin((VL53L5_Zone_Pitch8x8[ZoneNum])*M_PI/180);
+		CosOfPitch[ZoneNum] = cos((VL53L5_Zone_Pitch8x8[ZoneNum])*M_PI/180);
+		SinOfYaw[ZoneNum] = sin(VL53L5_Zone_Yaw8x8[ZoneNum]*M_PI/180);
+		CosOfYaw[ZoneNum] = cos(VL53L5_Zone_Yaw8x8[ZoneNum]*M_PI/180);
+	}
+}
+
+void ConvertDist2XYZCoords8x8(VL53L5CX_ResultsData *ResultsData, sensor_msgs::PointCloud* point_cloud)
+{
+	uint8_t ZoneNum;
+	float Hyp;
+	for (ZoneNum = 0; ZoneNum < 64; ZoneNum++)
+	{
+		if ((ResultsData->nb_target_detected[ZoneNum] > 0) && (ResultsData->distance_mm[ZoneNum] > 0) && ((ResultsData->target_status[ZoneNum] == 5) || (ResultsData->target_status[ZoneNum] == 6) || (ResultsData->target_status[ZoneNum] == 9)) )
+		{
+            geometry_msgs::Point32 p;
+			Hyp = ResultsData->distance_mm[ZoneNum]/SinOfPitch[ZoneNum];
+			p.x = CosOfYaw[ZoneNum]*CosOfPitch[ZoneNum]*Hyp*0.001;
+			p.y = SinOfYaw[ZoneNum]*CosOfPitch[ZoneNum]*Hyp*0.001;
+			p.z = ResultsData->distance_mm[ZoneNum]*0.001;
+            point_cloud->points.push_back(p);
+		}
+	}
+}
 
 void abort_handler(int signum) {
     gogogo = 0;
@@ -96,8 +147,6 @@ void abort_handler(int signum) {
 
 int main(int argc, char** argv)
 {
-    int sock_fd, prx_msg = 1;
-    struct sockaddr_un ipc_addr, local_addr;
     struct sigaction abort_act;
 
 	/*********************************/
@@ -108,21 +157,23 @@ int main(int argc, char** argv)
 	VL53L5CX_ResultsData 	Results;		/* Results data from VL53L5CX */
 	VL53L5CX_Configuration 	Dev;
 
-    sock_fd = socket(AF_UNIX, SOCK_DGRAM, 0);
-    memset(&local_addr, 0, sizeof(local_addr));
-    local_addr.sun_family = AF_UNIX;
-    strcpy(local_addr.sun_path, SOCK_PATH);
-    unlink(SOCK_PATH);
-    bind(sock_fd, (struct sockaddr*)&local_addr, sizeof(local_addr));
-
-    memset(&ipc_addr, 0, sizeof(ipc_addr));
-    ipc_addr.sun_family = AF_UNIX;
-    strcpy(ipc_addr.sun_path, SERVER_PATH);
-
     abort_act.sa_handler = abort_handler;
     sigemptyset(&abort_act.sa_mask);
     abort_act.sa_flags = 0;
     sigaction(SIGINT, &abort_act, NULL);
+
+    ComputeSinCosTables();
+
+    ros::init(argc, argv, "vl53l5cx_ros", ros::init_options::NoSigintHandler);
+    ros::NodeHandle nh;
+    ROS_INFO("vl53l5cx ros");
+    /*sensor_msgs::PointCloud point_cloud;
+    point_cloud.header.frame_id = "world"
+    point_cloud.points.resize(64);
+    point_cloud.channels.resize(1);
+    point_cloud.channels[0].name = "intensity";
+    point_cloud.channels[0].values.resize(64);*/
+    ros::Publisher pub = nh.advertise<sensor_msgs::PointCloud>("/vins_estimator/point_cloud", 5);
 
 	/*********************************/
 	/*   Power on sensor and init    */
@@ -158,7 +209,7 @@ int main(int argc, char** argv)
 	/* Set resolution in 8x8. WARNING : As others settings depend to this
 	 * one, it must be the first to use.
 	 */
-	status = vl53l5cx_set_resolution(&Dev, VL53L5CX_RESOLUTION_4X4);
+	status = vl53l5cx_set_resolution(&Dev, VL53L5CX_RESOLUTION_8X8);
 	if(status)
 	{
 		printf("vl53l5cx_set_resolution failed, status %u\n", status);
@@ -169,7 +220,7 @@ int main(int argc, char** argv)
 	 * Using 4x4, min frequency is 1Hz and max is 60Hz
 	 * Using 8x8, min frequency is 1Hz and max is 15Hz
 	 */
-	status = vl53l5cx_set_ranging_frequency_hz(&Dev, 20);
+	status = vl53l5cx_set_ranging_frequency_hz(&Dev, 10);
 	if(status)
 	{
 		printf("vl53l5cx_set_ranging_frequency_hz failed, status %u\n", status);
@@ -204,21 +255,22 @@ int main(int argc, char** argv)
 			/* As the sensor is set in 4x4 mode by default, we have a total 
 			 * of 16 zones to print. For this example, only the data of first zone are 
 			 * print */
-			/*printf("Print data no : %3u\n", Dev.streamcount);
-			for(int i = 0; i < 16; i++)
+#if 0
+			printf("Print data no : %3u\n", Dev.streamcount);
+			for(int i = 0; i < 64; i++)
 			{
 				printf("Zone : %3d, Status : %3u, Distance : %4d mm\n",
 					i,
 					Results.target_status[VL53L5CX_NB_TARGET_PER_ZONE*i],
 					Results.distance_mm[VL53L5CX_NB_TARGET_PER_ZONE*i]);
 			}
-			printf("\n");*/
-            if ((Results.target_status[5] == 5 && Results.distance_mm[5] < 1500) ||
-                (Results.target_status[6] == 5 && Results.distance_mm[6] < 1500) ||
-                (Results.target_status[9] == 5 && Results.distance_mm[9] < 1500) ||
-                (Results.target_status[10] == 5 && Results.distance_mm[10] < 1500)) {
-                    sendto(sock_fd, &prx_msg, sizeof(prx_msg), 0, (struct sockaddr*)&ipc_addr, sizeof(ipc_addr));
-            }
+			printf("\n");
+#endif
+            sensor_msgs::PointCloud point_cloud;
+            point_cloud.header.stamp = ros::Time::now();
+            point_cloud.header.frame_id = "world";
+            ConvertDist2XYZCoords8x8(&Results, &point_cloud);
+            pub.publish(point_cloud);
 		}
 
 		/* Wait a few ms to avoid too high polling (function in platform
