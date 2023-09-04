@@ -133,9 +133,9 @@ void ConvertDist2XYZCoords8x8(VL53L5CX_ResultsData *ResultsData, sensor_msgs::Po
 		{
             geometry_msgs::Point32 p;
 			Hyp = ResultsData->distance_mm[ZoneNum]/SinOfPitch[ZoneNum];
-			p.x = CosOfYaw[ZoneNum]*CosOfPitch[ZoneNum]*Hyp*0.001;
-			p.y = SinOfYaw[ZoneNum]*CosOfPitch[ZoneNum]*Hyp*0.001;
-			p.z = ResultsData->distance_mm[ZoneNum]*0.001;
+			p.y = CosOfYaw[ZoneNum]*CosOfPitch[ZoneNum]*Hyp*0.001;
+			p.z = SinOfYaw[ZoneNum]*CosOfPitch[ZoneNum]*Hyp*-0.001;
+			p.x = ResultsData->distance_mm[ZoneNum]*0.001;
             point_cloud->points.push_back(p);
 		}
 	}
@@ -164,8 +164,8 @@ int main(int argc, char** argv)
 
     ComputeSinCosTables();
 
-    ros::init(argc, argv, "vl53l5cx_ros", ros::init_options::NoSigintHandler);
-    ros::NodeHandle nh;
+    ros::init(argc, argv, "tof", ros::init_options::NoSigintHandler);
+    ros::NodeHandle nh("~");
     ROS_INFO("vl53l5cx ros");
     /*sensor_msgs::PointCloud point_cloud;
     point_cloud.header.frame_id = "world"
@@ -173,7 +173,7 @@ int main(int argc, char** argv)
     point_cloud.channels.resize(1);
     point_cloud.channels[0].name = "intensity";
     point_cloud.channels[0].values.resize(64);*/
-    ros::Publisher pub = nh.advertise<sensor_msgs::PointCloud>("/vins_estimator/point_cloud", 5);
+    ros::Publisher pub = nh.advertise<sensor_msgs::PointCloud>("point_cloud", 5);
 
 	/*********************************/
 	/*   Power on sensor and init    */
@@ -220,7 +220,7 @@ int main(int argc, char** argv)
 	 * Using 4x4, min frequency is 1Hz and max is 60Hz
 	 * Using 8x8, min frequency is 1Hz and max is 15Hz
 	 */
-	status = vl53l5cx_set_ranging_frequency_hz(&Dev, 10);
+	status = vl53l5cx_set_ranging_frequency_hz(&Dev, 15);
 	if(status)
 	{
 		printf("vl53l5cx_set_ranging_frequency_hz failed, status %u\n", status);
@@ -268,7 +268,7 @@ int main(int argc, char** argv)
 #endif
             sensor_msgs::PointCloud point_cloud;
             point_cloud.header.stamp = ros::Time::now();
-            point_cloud.header.frame_id = "world";
+            point_cloud.header.frame_id = "body";
             ConvertDist2XYZCoords8x8(&Results, &point_cloud);
             pub.publish(point_cloud);
 		}
