@@ -123,11 +123,11 @@ int gogogo = 1;
 //https://community.st.com/t5/imaging-sensors/vl53l5cx-multi-zone-sensor-get-x-y-z-of-points-relative-to/td-p/172929
 //https://community.st.com/t5/imaging-sensors/vl53l5cx-distances-don-t-match-theory-what-am-i-missing/td-p/82657
 
-void ConvertDist2XYZCoords8x8(VL53L5CX_ResultsData *ResultsData, sensor_msgs::PointCloud* point_cloud)
+void ConvertDist2XYZCoords(VL53L5CX_ResultsData *ResultsData, sensor_msgs::PointCloud* point_cloud)
 {
 	uint8_t ZoneNum;
     double dist_m;
-	for (ZoneNum = 0; ZoneNum < 64; ZoneNum++)
+	for (ZoneNum = 0; ZoneNum < 16; ZoneNum++)
 	{
 		if ((ResultsData->nb_target_detected[ZoneNum] > 0) && (ResultsData->distance_mm[ZoneNum] > 0) && ((ResultsData->target_status[ZoneNum] == 5) || (ResultsData->target_status[ZoneNum] == 6) || (ResultsData->target_status[ZoneNum] == 9)) )
 		{
@@ -165,12 +165,6 @@ int main(int argc, char** argv)
     ros::init(argc, argv, "tof", ros::init_options::NoSigintHandler);
     ros::NodeHandle nh("~");
     ROS_INFO("vl53l5cx ros");
-    /*sensor_msgs::PointCloud point_cloud;
-    point_cloud.header.frame_id = "world"
-    point_cloud.points.resize(64);
-    point_cloud.channels.resize(1);
-    point_cloud.channels[0].name = "intensity";
-    point_cloud.channels[0].values.resize(64);*/
     ros::Publisher pub = nh.advertise<sensor_msgs::PointCloud>("point_cloud", 5);
 
 	/*********************************/
@@ -255,7 +249,7 @@ int main(int argc, char** argv)
 			 * print */
 #if 0
 			printf("Print data no : %3u\n", Dev.streamcount);
-			for(int i = 0; i < 64; i++)
+			for(int i = 0; i < 16; i++)
 			{
 				printf("Zone : %3d, Status : %3u, Distance : %4d mm\n",
 					i,
@@ -267,7 +261,7 @@ int main(int argc, char** argv)
             sensor_msgs::PointCloud point_cloud;
             point_cloud.header.stamp = ros::Time::now();
             point_cloud.header.frame_id = "body";
-            ConvertDist2XYZCoords8x8(&Results, &point_cloud);
+            ConvertDist2XYZCoords(&Results, &point_cloud);
             pub.publish(point_cloud);
 		}
 
